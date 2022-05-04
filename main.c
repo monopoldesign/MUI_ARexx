@@ -235,7 +235,7 @@ struct ObjApp *CreateApp(void)
 	// Window-Close-Method
 	DoMethod(ObjectApp->WI_label_0, MUIM_Notify, MUIA_Window_CloseRequest, TRUE, ObjectApp->App, 2, MUIM_Application_ReturnID, MUIV_Application_ReturnID_Quit);
 
-=	// Window open
+	// Window open
 	set(ObjectApp->WI_label_0, MUIA_Window_Open, TRUE);
 
 	return(ObjectApp);
