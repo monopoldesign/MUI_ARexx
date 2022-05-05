@@ -18,6 +18,7 @@
 *******************************************************************************/
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <exec/memory.h>
 #include <libraries/easyrexx.h>
@@ -38,6 +39,13 @@
 /******************************************************************************
 * Prototypes
 *******************************************************************************/
+HOOKPROTONH(ButtonFunc, ULONG, Object *obj, int *msg);
+
+BOOL arexxfuncQUIT(struct ARexxContext *c);
+BOOL arexxfuncSETTEXT(struct ARexxContext *c);
+BOOL arexxfuncSETSTRING(struct ARexxContext *c);
+BOOL arexxfuncSETSLIDER(struct ARexxContext *c);
+
 BOOL myHandleARexx(struct ARexxContext *c);
 BOOL checkARexxPorts();
 void init(void);
@@ -61,6 +69,12 @@ struct ObjApp
 	char *	STR_TX_Receive;
 };
 
+struct ARexxRetValues
+{
+	LONG result, resultlong;
+	UBYTE *resultstring, *error;
+};
+
 /******************************************************************************
 * Global Variables
 *******************************************************************************/
@@ -71,15 +85,89 @@ struct Library *EasyRexxBase;
 char buffer[40];
 struct ObjApp *App = NULL;
 
-struct ARexxContext *context;
+MakeHook(hook_button, ButtonFunc);
 
-#define AREXX_QUIT 1
+struct ARexxRetValues arexxReturn =
+{
+	0, 0,
+	0, 0
+};
+
+struct ARexxContext *arexxContext;
+char portName[20];
+
+enum arcmd{AREXX_QUIT = 1, AREXX_SETTEXT, AREXX_SETSTRING, AREXX_SETSLIDER};
 
 struct ARexxCommandTable commandTable[] =
 {
-  AREXX_QUIT, "QUIT", NULL,	NULL,
-  TABLE_END,
+	AREXX_QUIT, "QUIT", "",	(APTR)arexxfuncQUIT,
+	AREXX_SETTEXT, "SETTEXT", "ITEM/A", (APTR)arexxfuncSETTEXT,
+	AREXX_SETSTRING, "SETSTRING", "ITEM/A", (APTR)arexxfuncSETSTRING,
+	AREXX_SETSLIDER, "SETSLIDER", "VALUE/A", (APTR)arexxfuncSETSLIDER,
+	TABLE_END,
 };
+
+/******************************************************************************
+* Hook-Functions
+*******************************************************************************/
+
+/*-----------------------------------------------------------------------------
+- ButtonFunc()
+- Function for Button-Hook
+------------------------------------------------------------------------------*/
+HOOKPROTONH(ButtonFunc, ULONG, Object *obj, int *msg)
+{
+	LONG result;
+
+	sprintf(buffer, "QUIT");
+
+	result = SendARexxCommand(buffer, 
+						ER_Portname, portName,
+						ER_Context, arexxContext,
+						ER_Asynch, TRUE,
+						ER_String, TRUE,
+						TAG_DONE);
+
+	return 0;
+}
+
+/******************************************************************************
+* ARexx-Functions
+*******************************************************************************/
+/*-----------------------------------------------------------------------------
+-
+------------------------------------------------------------------------------*/
+BOOL arexxfuncQUIT(struct ARexxContext *c)
+{
+	return FALSE;
+}
+
+/*-----------------------------------------------------------------------------
+-
+------------------------------------------------------------------------------*/
+BOOL arexxfuncSETTEXT(struct ARexxContext *c)
+{
+	DoMethod(App->TX_Receive, MUIM_Set, MUIA_Text_Contents, ARGSTRING(c, 0));
+	return TRUE;	
+}
+
+/*-----------------------------------------------------------------------------
+-
+------------------------------------------------------------------------------*/
+BOOL arexxfuncSETSTRING(struct ARexxContext *c)
+{
+	DoMethod(App->STR_Value, MUIM_Set, MUIA_String_Contents, ARGSTRING(c, 0));
+	return TRUE;
+}
+
+/*-----------------------------------------------------------------------------
+-
+------------------------------------------------------------------------------*/
+BOOL arexxfuncSETSLIDER(struct ARexxContext *c)
+{
+	DoMethod(App->SL_Value2, MUIM_Set, MUIA_Slider_Level, (LONG)atoi(ARGSTRING(c, 0)));
+	return TRUE;
+}
 
 /******************************************************************************
 * Main-Program
@@ -103,7 +191,7 @@ int main(int argc, char *argv[])
 		end();
 	}
 
-	context = AllocARexxContext(ER_CommandTable, commandTable,
+	arexxContext = AllocARexxContext(ER_CommandTable, commandTable,
 								ER_Author,      "M.Volkel",
 								ER_Copyright,   "(C)2022 M.Volkel",
 								ER_Version,     "MUI_ARexx V0.1",
@@ -114,8 +202,8 @@ int main(int argc, char *argv[])
 
 	while (running)
 	{
-		if (sigrcvd & ER_SIGNAL(context))
-			running = myHandleARexx(context);
+		if (sigrcvd & ER_SIGNAL(arexxContext))
+			running = myHandleARexx(arexxContext);
 		else
 		{
 			switch (DoMethod(App->App, MUIM_Application_NewInput, &signal))
@@ -132,10 +220,10 @@ int main(int argc, char *argv[])
 		}
 
 		if (running && signal)
-			sigrcvd = Wait(signal | ER_SIGNAL(context));
+			sigrcvd = Wait(signal | ER_SIGNAL(arexxContext));
 	}
 
-	FreeARexxContext(context);
+	FreeARexxContext(arexxContext);
 	DisposeApp(App);
 	end();
 }
@@ -145,24 +233,38 @@ int main(int argc, char *argv[])
 ------------------------------------------------------------------------------*/
 BOOL myHandleARexx(struct ARexxContext *c)
 {
+	ARexxFunc func;
+	UBYTE i = 0;
+
 	LONG result = RC_OK, resultlong = ~0;
 	UBYTE *resultstring = NULL, *error = NULL;
 	BOOL running = TRUE;
 
+	arexxReturn.result = RC_OK;
+	arexxReturn.resultstring = NULL;
+	arexxReturn.resultlong = ~0;
+	arexxReturn.error = NULL;
+
 	while (GetARexxMsg(c))
 	{
-		switch (c->id)
+		while (arexxContext->table[i].command)
 		{
-			case AREXX_QUIT:
-				running = FALSE;
+			if (arexxContext->table[i].id == arexxContext->id)
+			{
+				if (func = (ARexxFunc)(arexxContext->table[i].userdata))
+					running = func(arexxContext);
+
 				break;
+			}
+			else
+				i++;
 		}
 		
-		ReplyARexxMsg(c,
-						ER_ReturnCode, result,
-						(resultstring	? ER_ResultString :TAG_IGNORE), resultstring,
-						(resultlong!=~0 ? ER_ResultLong   :TAG_IGNORE), resultlong,
-						(error          ? ER_ErrorMessage :TAG_IGNORE), error,
+		ReplyARexxMsg(arexxContext,
+						ER_ReturnCode, arexxReturn.result,
+						(arexxReturn.resultstring ? ER_ResultString : TAG_IGNORE), arexxReturn.resultstring,
+ 						(arexxReturn.resultlong != ~0 ? ER_ResultLong : TAG_IGNORE), arexxReturn.resultlong,
+						(arexxReturn.error ? ER_ErrorMessage : TAG_IGNORE), arexxReturn.error,
 						TAG_DONE);
 	}
 	return running;
@@ -173,28 +275,18 @@ BOOL myHandleARexx(struct ARexxContext *c)
 ------------------------------------------------------------------------------*/
 BOOL checkARexxPorts()
 {
-	struct MsgPort *port;
-
-	Forbid();
-	port = FindPort("MYAREXX.2");
-	Permit();
-
-	if (port)
-		return FALSE;
+	if (strcmp((UBYTE *)arexxContext->portname, "MYAREXX") == 0)
+		sprintf(portName, "MYAREXX.1");
+	else if (strcmp((UBYTE *)arexxContext->portname, "MYAREXX.1") == 0)
+		sprintf(portName, "MYAREXX");
 	else
-	{
-		Forbid();
-		port = FindPort("MYAREXX.1");
-		Permit();
+		return FALSE;
 
-		if (port)
-			DoMethod(App->WI_label_0, MUIM_Set, MUIA_Window_Title, "MYAREXX.1");
-		else
-			DoMethod(App->WI_label_0, MUIM_Set, MUIA_Window_Title, "MYAREXX");
-	}
+	DoMethod(App->WI_label_0, MUIM_Set, MUIA_Window_Title, (UBYTE *)arexxContext->portname);
 
 	return TRUE;
 }
+
 /*-----------------------------------------------------------------------------
 - init()
 ------------------------------------------------------------------------------*/
@@ -329,6 +421,9 @@ struct ObjApp *CreateApp(void)
 
 	// Window-Close-Method
 	DoMethod(ObjectApp->WI_label_0, MUIM_Notify, MUIA_Window_CloseRequest, TRUE, ObjectApp->App, 2, MUIM_Application_ReturnID, MUIV_Application_ReturnID_Quit);
+
+	// Hook-Methods for Buttons
+	DoMethod(ObjectApp->BT_Send, MUIM_Notify, MUIA_Pressed, FALSE, MUIV_Notify_Self, 2, MUIM_CallHook, &hook_button);
 
 	// Window open
 	set(ObjectApp->WI_label_0, MUIA_Window_Open, TRUE);
