@@ -20,12 +20,14 @@
 #include <stdlib.h>
 
 #include <exec/memory.h>
+#include <libraries/easyrexx.h>
 #include <libraries/gadtools.h>
 #include <libraries/mui.h>
 #include <proto/exec.h>
 
 #include <pragma/muimaster_lib.h>
 #include <pragma/commodities_lib.h>
+#include <pragma/easyrexx_lib.h>
 
 /******************************************************************************
 * Macros
@@ -36,6 +38,7 @@
 /******************************************************************************
 * Prototypes
 *******************************************************************************/
+BOOL checkARexxPorts();
 void init(void);
 void end(void);
 struct ObjApp *CreateApp(void);
@@ -62,9 +65,26 @@ struct ObjApp
 *******************************************************************************/
 struct IntuitionBase *IntuitionBase;
 struct Library *MUIMasterBase;
+struct Library *EasyRexxBase;
 
 char buffer[40];
 struct ObjApp *App = NULL;
+
+struct ARexxContext *context;
+
+#define AREXX_REQUEST			1
+#define AREXX_REQUESTFILE		2
+#define AREXX_REQUESTNUMBER		3
+#define AREXX_REQUESTSTRING		4
+
+struct ARexxCommandTable commandTable[] =
+{
+  AREXX_REQUEST,	"REQUEST",	NULL,	NULL,
+  AREXX_REQUESTFILE,	"REQUESTFILE",	"TITLE/A,FILE/A,SAVE/S,DRAWERS/S,NOICONS/S",	NULL,
+  AREXX_REQUESTNUMBER,	"REQUESTNUMBER",	"TITLE/A,NUMBER/N,GADGETS/A",	NULL,
+  AREXX_REQUESTSTRING,	"REQUESTSTRING",	"TITLE/A,STRING/F,GADGETS/A",	NULL,
+  TABLE_END,
+};
 
 /******************************************************************************
 * Main-Program
@@ -88,9 +108,18 @@ int main(int argc, char *argv[])
 		end();
 	}
 
+	context = AllocARexxContext(ER_CommandTable, commandTable,
+								ER_Author,      "M.Volkel",
+								ER_Copyright,   "(C)2022 M.Volkel",
+								ER_Version,     "MUI_ARexx V0.1",
+								ER_Portname,    "MYAREXX",
+								TAG_DONE);
+
+	running = checkARexxPorts();
+
 	while (running)
 	{
-		switch (DoMethod(App->App, MUIM_Application_Input, &signal))
+		switch (DoMethod(App->App, MUIM_Application_NewInput, &signal))
 		{
 			// Window close
 			case MUIV_Application_ReturnID_Quit:
@@ -106,10 +135,38 @@ int main(int argc, char *argv[])
 			Wait(signal);
 	}
 
+	FreeARexxContext(context);
 	DisposeApp(App);
 	end();
 }
 
+/*-----------------------------------------------------------------------------
+- checkARexxPorts()
+------------------------------------------------------------------------------*/
+BOOL checkARexxPorts()
+{
+	struct MsgPort *port;
+
+	Forbid();
+	port = FindPort("MYAREXX.2");
+	Permit();
+
+	if (port)
+		return FALSE;
+	else
+	{
+		Forbid();
+		port = FindPort("MYAREXX.1");
+		Permit();
+
+		if (port)
+			DoMethod(App->WI_label_0, MUIM_Set, MUIA_Window_Title, "MYAREXX.1");
+		else
+			DoMethod(App->WI_label_0, MUIM_Set, MUIA_Window_Title, "MYAREXX");
+	}
+
+	return TRUE;
+}
 /*-----------------------------------------------------------------------------
 - init()
 ------------------------------------------------------------------------------*/
@@ -127,6 +184,14 @@ void init(void)
 		CloseLibrary((struct Library *)IntuitionBase);
 		exit(20);
 	}
+
+	if (!(EasyRexxBase = OpenLibrary((UBYTE *)EASYREXXNAME, (ULONG)EASYREXXVERSION)))
+	{
+		printf("Can't Open EasyRexx Library\n");
+		CloseLibrary((struct Library *)MUIMasterBase);
+		CloseLibrary((struct Library *)IntuitionBase);
+		exit(20);
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -134,9 +199,10 @@ void init(void)
 ------------------------------------------------------------------------------*/
 void end(void)
 {
+	CloseLibrary((struct Library *)EasyRexxBase);
 	CloseLibrary((struct Library *)MUIMasterBase);
 	CloseLibrary((struct Library *)IntuitionBase);
-	exit(20);
+	exit(0);
 }
 
 /*-----------------------------------------------------------------------------
@@ -222,6 +288,7 @@ struct ObjApp *CreateApp(void)
 		MUIA_Application_Version,		"$VER: MUI_ARexx V0.1",
 		MUIA_Application_Copyright,		"(C)2022 M.Volkel",
 		MUIA_Application_Description,	"ARexx-Test",
+		MUIA_Application_UseRexx,		FALSE,
 		SubWindow,						ObjectApp->WI_label_0,
 	End;
 
