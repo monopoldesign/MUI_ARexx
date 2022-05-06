@@ -118,15 +118,19 @@ struct ARexxCommandTable commandTable[] =
 HOOKPROTONH(ButtonFunc, ULONG, Object *obj, int *msg)
 {
 	LONG result;
+	LONG val;
+	char *line;
 
-	sprintf(buffer, "QUIT");
+	get(App->STR_Value, MUIA_String_Contents, &line);
+	sprintf(buffer, "SETTEXT %s", line);
+	result = SendARexxCommand(buffer, ER_Portname, portName, ER_Context, arexxContext, ER_Asynch, TRUE, ER_String, TRUE, TAG_DONE);
 
-	result = SendARexxCommand(buffer, 
-						ER_Portname, portName,
-						ER_Context, arexxContext,
-						ER_Asynch, TRUE,
-						ER_String, TRUE,
-						TAG_DONE);
+	sprintf(buffer, "SETSTRING %s", line);
+	result = SendARexxCommand(buffer, ER_Portname, portName, ER_Context, arexxContext, ER_Asynch, TRUE, ER_String, TRUE, TAG_DONE);
+
+	get(App->SL_Value2, MUIA_Slider_Level, &val);
+	sprintf(buffer, "SETSLIDER %ld", val);
+	result = SendARexxCommand(buffer, ER_Portname, portName, ER_Context, arexxContext, ER_Asynch, TRUE, ER_String, TRUE, TAG_DONE);
 
 	return 0;
 }
