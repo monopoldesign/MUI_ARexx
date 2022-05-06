@@ -40,6 +40,9 @@
 * Prototypes
 *******************************************************************************/
 HOOKPROTONH(ButtonFunc, ULONG, Object *obj, int *msg);
+HOOKPROTONH(SliderFunc, ULONG, Object *obj, int *msg);
+HOOKPROTONH(StringFunc, ULONG, Object *obj, char *msg);
+HOOKPROTONH(CheckFunc, ULONG, Object *obj, char *msg);
 
 BOOL arexxfuncQUIT(struct ARexxContext *c);
 BOOL arexxfuncSETTEXT(struct ARexxContext *c);
@@ -65,6 +68,7 @@ struct ObjApp
 	APTR	TX_Receive;
 	APTR	STR_Value;
 	APTR	SL_Value2;
+	APTR	CH_label_0;
 	APTR	BT_Send;
 	char *	STR_TX_Receive;
 };
@@ -86,6 +90,9 @@ char buffer[40];
 struct ObjApp *App = NULL;
 
 MakeHook(hook_button, ButtonFunc);
+MakeHook(hook_slider, SliderFunc);
+MakeHook(hook_string, StringFunc);
+MakeHook(hook_check, CheckFunc);
 
 struct ARexxRetValues arexxReturn =
 {
@@ -106,6 +113,8 @@ struct ARexxCommandTable commandTable[] =
 	AREXX_SETSLIDER, "SETSLIDER", "VALUE/A", (APTR)arexxfuncSETSLIDER,
 	TABLE_END,
 };
+
+BOOL useHooks = TRUE;
 
 /******************************************************************************
 * Hook-Functions
@@ -131,6 +140,72 @@ HOOKPROTONH(ButtonFunc, ULONG, Object *obj, int *msg)
 	get(App->SL_Value2, MUIA_Slider_Level, &val);
 	sprintf(buffer, "SETSLIDER %ld", val);
 	result = SendARexxCommand(buffer, ER_Portname, portName, ER_Context, arexxContext, ER_Asynch, TRUE, ER_String, TRUE, TAG_DONE);
+
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
+- SliderFunc()
+- Function for Slider-Hook
+------------------------------------------------------------------------------*/
+HOOKPROTONH(SliderFunc, ULONG, Object *obj, int *msg)
+{
+	LONG result;
+
+	if (useHooks)
+	{
+		sprintf(buffer, "SETSLIDER %ld", *msg);
+		result = SendARexxCommand(buffer, ER_Portname, portName, ER_Context, arexxContext, ER_Asynch, TRUE, ER_String, TRUE, TAG_DONE);
+	}
+
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
+- StringFunc()
+- Function for String-Hook
+------------------------------------------------------------------------------*/
+HOOKPROTONH(StringFunc, ULONG, Object *obj, char *msg)
+{
+	LONG result;
+	char *line;
+
+	if (useHooks)
+	{
+		get(App->STR_Value, MUIA_String_Contents, &line);
+
+		DoMethod(App->TX_Receive, MUIM_Set, MUIA_Text_Contents, line);
+
+		sprintf(buffer, "SETTEXT %s", line);
+		result = SendARexxCommand(buffer, ER_Portname, portName, ER_Context, arexxContext, ER_Asynch, TRUE, ER_String, TRUE, TAG_DONE);
+
+		sprintf(buffer, "SETSTRING %s", line);
+		result = SendARexxCommand(buffer, ER_Portname, portName, ER_Context, arexxContext, ER_Asynch, TRUE, ER_String, TRUE, TAG_DONE);
+	}
+
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
+- CheckFunc()
+- Function for String-Hook
+------------------------------------------------------------------------------*/
+HOOKPROTONH(CheckFunc, ULONG, Object *obj, char *msg)
+{
+	LONG checked;
+
+	get(App->CH_label_0, MUIA_Selected, &checked);
+
+	if (checked)
+	{
+		useHooks = TRUE;
+		DoMethod(App->BT_Send, MUIM_Set, MUIA_Disabled, TRUE);
+	}
+	else
+	{
+		useHooks = FALSE;
+		DoMethod(App->BT_Send, MUIM_Set, MUIA_Disabled, FALSE);
+	}
 
 	return 0;
 }
@@ -337,7 +412,7 @@ struct ObjApp *CreateApp(void)
 	struct ObjApp * ObjectApp;
 
 	APTR	GROUP_ROOT_0, GR_grp_1, LA_label_3, obj_aux0, obj_aux1, obj_aux2;
-	APTR	obj_aux3;
+	APTR	obj_aux3, obj_aux4, obj_aux5;
 
 	if (!(ObjectApp = AllocVec(sizeof(struct ObjApp),MEMF_CLEAR)))
 		return(NULL);
@@ -362,7 +437,7 @@ struct ObjApp *CreateApp(void)
 	ObjectApp->STR_Value = StringObject,
 		MUIA_Frame,			MUIV_Frame_String,
 		MUIA_HelpNode,		"STR_Value",
-		MUIA_String_MaxLen,	4,
+		MUIA_String_MaxLen,	16,
 	End;
 
 	obj_aux1 = Label2("Value:");
@@ -389,20 +464,32 @@ struct ObjApp *CreateApp(void)
 		Child,				ObjectApp->SL_Value2,
 	End;
 
+	ObjectApp->CH_label_0 = CheckMark(TRUE);
+
+	obj_aux5 = Label2("Use Hooks:");
+
+	obj_aux4 = GroupObject,
+		MUIA_Group_Columns, 2,
+		Child, obj_aux5,
+		Child, ObjectApp->CH_label_0,
+	End;
+
 	ObjectApp->BT_Send = SimpleButton("Send ARexx");
 
 	GROUP_ROOT_0 = GroupObject,
+		MUIA_Group_Columns, 2,
 		Child,	GR_grp_1,
 		Child,	obj_aux0,
 		Child,	obj_aux2,
+		Child,	obj_aux4,
 		Child,	ObjectApp->BT_Send,
 	End;
 
 	ObjectApp->WI_label_0 = WindowObject,
 		MUIA_Window_Title,		"MUI_ARexx",
 		MUIA_Window_ID,			MAKE_ID('0', 'W', 'I', 'N'),
-		MUIA_Window_SizeGadget,	FALSE,
 		WindowContents,			GROUP_ROOT_0,
+		MUIA_Window_SizeGadget,	TRUE,
 	End;
 
 	ObjectApp->App = ApplicationObject,
@@ -428,6 +515,18 @@ struct ObjApp *CreateApp(void)
 
 	// Hook-Methods for Buttons
 	DoMethod(ObjectApp->BT_Send, MUIM_Notify, MUIA_Pressed, FALSE, MUIV_Notify_Self, 2, MUIM_CallHook, &hook_button);
+
+	// Hook-Method for Slider
+	DoMethod(ObjectApp->SL_Value2, MUIM_Notify, MUIA_Slider_Level, MUIV_EveryTime, ObjectApp->App, 3, MUIM_CallHook, &hook_slider, MUIV_TriggerValue);
+
+	// Hook-Method for String
+	DoMethod(ObjectApp->STR_Value, MUIM_Notify, MUIA_String_Acknowledge, MUIV_EveryTime, ObjectApp->App, 2, MUIM_CallHook, &hook_string);
+
+	// Hook-Method for Checkbox
+	DoMethod(ObjectApp->CH_label_0, MUIM_Notify, MUIA_Selected, MUIV_EveryTime, ObjectApp->App, 2, MUIM_CallHook, &hook_check);
+
+	// Disable Send-Button
+	DoMethod(ObjectApp->BT_Send, MUIM_Set, MUIA_Disabled, TRUE);
 
 	// Window open
 	set(ObjectApp->WI_label_0, MUIA_Window_Open, TRUE);
