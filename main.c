@@ -41,8 +41,8 @@
 *******************************************************************************/
 HOOKPROTONH(ButtonFunc, ULONG, Object *obj, int *msg);
 HOOKPROTONH(SliderFunc, ULONG, Object *obj, int *msg);
-HOOKPROTONH(StringFunc, ULONG, Object *obj, char *msg);
-HOOKPROTONH(CheckFunc, ULONG, Object *obj, char *msg);
+HOOKPROTONH(StringFunc, ULONG, Object *obj, char **msg);
+HOOKPROTONH(CheckFunc, ULONG, Object *obj, int *msg);
 
 BOOL arexxfuncQUIT(struct ARexxContext *c);
 BOOL arexxfuncSETTEXT(struct ARexxContext *c);
@@ -165,21 +165,18 @@ HOOKPROTONH(SliderFunc, ULONG, Object *obj, int *msg)
 - StringFunc()
 - Function for String-Hook
 ------------------------------------------------------------------------------*/
-HOOKPROTONH(StringFunc, ULONG, Object *obj, char *msg)
+HOOKPROTONH(StringFunc, ULONG, Object *obj, char **msg)
 {
 	LONG result;
-	char *line;
 
 	if (useHooks)
 	{
-		get(App->STR_Value, MUIA_String_Contents, &line);
+		DoMethod(App->TX_Receive, MUIM_Set, MUIA_Text_Contents, *msg);
 
-		DoMethod(App->TX_Receive, MUIM_Set, MUIA_Text_Contents, line);
-
-		sprintf(buffer, "SETTEXT %s", line);
+		sprintf(buffer, "SETTEXT %s", *msg);
 		result = SendARexxCommand(buffer, ER_Portname, portName, ER_Context, arexxContext, ER_Asynch, TRUE, ER_String, TRUE, TAG_DONE);
 
-		sprintf(buffer, "SETSTRING %s", line);
+		sprintf(buffer, "SETSTRING %s", *msg);
 		result = SendARexxCommand(buffer, ER_Portname, portName, ER_Context, arexxContext, ER_Asynch, TRUE, ER_String, TRUE, TAG_DONE);
 	}
 
@@ -190,13 +187,9 @@ HOOKPROTONH(StringFunc, ULONG, Object *obj, char *msg)
 - CheckFunc()
 - Function for String-Hook
 ------------------------------------------------------------------------------*/
-HOOKPROTONH(CheckFunc, ULONG, Object *obj, char *msg)
+HOOKPROTONH(CheckFunc, ULONG, Object *obj, int *msg)
 {
-	LONG checked;
-
-	get(App->CH_label_0, MUIA_Selected, &checked);
-
-	if (checked)
+	if (*msg)
 	{
 		useHooks = TRUE;
 		DoMethod(App->BT_Send, MUIM_Set, MUIA_Disabled, TRUE);
@@ -207,6 +200,15 @@ HOOKPROTONH(CheckFunc, ULONG, Object *obj, char *msg)
 		DoMethod(App->BT_Send, MUIM_Set, MUIA_Disabled, FALSE);
 	}
 
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
+- EmptyFunc()
+- Function for String-Hook
+------------------------------------------------------------------------------*/
+HOOKPROTONH(EmptyFunc, ULONG, Object *obj, char *msg)
+{
 	return 0;
 }
 
@@ -244,7 +246,7 @@ BOOL arexxfuncSETSTRING(struct ARexxContext *c)
 ------------------------------------------------------------------------------*/
 BOOL arexxfuncSETSLIDER(struct ARexxContext *c)
 {
-	DoMethod(App->SL_Value2, MUIM_Set, MUIA_Slider_Level, (LONG)atoi(ARGSTRING(c, 0)));
+	DoMethod(App->SL_Value2, MUIM_NoNotifySet, MUIA_Slider_Level, (LONG)atoi(ARGSTRING(c, 0)));
 	return TRUE;
 }
 
@@ -520,10 +522,10 @@ struct ObjApp *CreateApp(void)
 	DoMethod(ObjectApp->SL_Value2, MUIM_Notify, MUIA_Slider_Level, MUIV_EveryTime, ObjectApp->App, 3, MUIM_CallHook, &hook_slider, MUIV_TriggerValue);
 
 	// Hook-Method for String
-	DoMethod(ObjectApp->STR_Value, MUIM_Notify, MUIA_String_Acknowledge, MUIV_EveryTime, ObjectApp->App, 2, MUIM_CallHook, &hook_string);
+	DoMethod(ObjectApp->STR_Value, MUIM_Notify, MUIA_String_Acknowledge, MUIV_EveryTime, ObjectApp->App, 3, MUIM_CallHook, &hook_string, MUIV_TriggerValue);
 
 	// Hook-Method for Checkbox
-	DoMethod(ObjectApp->CH_label_0, MUIM_Notify, MUIA_Selected, MUIV_EveryTime, ObjectApp->App, 2, MUIM_CallHook, &hook_check);
+	DoMethod(ObjectApp->CH_label_0, MUIM_Notify, MUIA_Selected, MUIV_EveryTime, ObjectApp->App, 3, MUIM_CallHook, &hook_check, MUIV_TriggerValue);
 
 	// Disable Send-Button
 	DoMethod(ObjectApp->BT_Send, MUIM_Set, MUIA_Disabled, TRUE);
